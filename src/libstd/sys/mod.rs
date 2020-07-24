@@ -47,6 +47,10 @@ cfg_if::cfg_if! {
     } else if #[cfg(all(target_vendor = "fortanix", target_env = "sgx"))] {
         mod sgx;
         pub use self::sgx::*;
+    } else if #[cfg(target_arch = "mipsel-sony-psp")] {
+        panic!("HEYYYYYYYYYYYYYYYY");
+        mod psp;
+        pub use self::psp::*;
     } else {
         mod unsupported;
         pub use self::unsupported::*;
