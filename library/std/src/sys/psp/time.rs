@@ -1,4 +1,5 @@
 use crate::time::Duration;
+use libc::{sceKernelGetSystemTimeWide, sceKernelLibcTime};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Instant(Duration);
@@ -10,15 +11,20 @@ pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
 
 impl Instant {
     pub fn now() -> Instant {
-        panic!("Not implemented on PSP.... Yet!")
+        let usecs = unsafe { sceKernelGetSystemTimeWide() };
+        Self(Duration::from_micros(usecs as u64))
     }
 
     pub const fn zero() -> Instant {
         Instant(Duration::from_secs(0))
     }
 
+    // See libstd/time.rs - as far as we know, the PSP game clock (not the system time)
+    // is monotonic and seems very unlikely to ever go backwards, so we can leave this
+    // as-is for now until we see otherwise, and save ourselves an unnecessary Mutex
+    // lock + assignment + check.
     pub fn actually_monotonic() -> bool {
-        false
+        true
     }
 
     pub fn checked_sub_instant(&self, other: &Instant) -> Option<Duration> {
@@ -36,7 +42,11 @@ impl Instant {
 
 impl SystemTime {
     pub fn now() -> SystemTime {
-        panic!("time not implemented on this platform")
+        let mut t: i32 = 0;
+        unsafe {
+            sceKernelLibcTime(&mut t as _);
+        }
+        Self(Duration::from_secs(t as u64))
     }
 
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
