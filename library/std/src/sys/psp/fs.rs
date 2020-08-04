@@ -1,4 +1,4 @@
-use crate::ffi::OsString;
+use crate::ffi::{CString, OsString, c_void};
 use crate::fmt;
 use crate::hash::{Hash, Hasher};
 use crate::io::{self, IoSlice, IoSliceMut, SeekFrom};
@@ -6,18 +6,21 @@ use crate::path::{Path, PathBuf};
 use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, Void};
 
-pub struct File(Void);
+pub struct File(libc::SceUid);
 
-pub struct FileAttr(Void);
+pub struct FileAttr(libc::SceIoStat);
 
 pub struct ReadDir(Void);
 
-pub struct DirEntry(Void);
+pub struct DirEntry(libc::SceIoDirent);
 
 #[derive(Clone, Debug)]
-pub struct OpenOptions {}
+pub struct OpenOptions {
+    flags: i32,
+    perms: libc::IoPermissions,
+}
 
-pub struct FilePermissions(Void);
+pub struct FilePermissions(libc::IoPermissions);
 
 pub struct FileType(Void);
 
@@ -26,55 +29,55 @@ pub struct DirBuilder {}
 
 impl FileAttr {
     pub fn size(&self) -> u64 {
-        match self.0 {}
+        self.0.st_size as u64
     }
 
     pub fn perm(&self) -> FilePermissions {
-        match self.0 {}
+        unimplemented!()
     }
 
     pub fn file_type(&self) -> FileType {
-        match self.0 {}
+        unimplemented!()
     }
 
     pub fn modified(&self) -> io::Result<SystemTime> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn accessed(&self) -> io::Result<SystemTime> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn created(&self) -> io::Result<SystemTime> {
-        match self.0 {}
+        unsupported()
     }
 }
 
 impl Clone for FileAttr {
     fn clone(&self) -> FileAttr {
-        match self.0 {}
+        unimplemented!()
     }
 }
 
 impl FilePermissions {
     pub fn readonly(&self) -> bool {
-        match self.0 {}
+        unimplemented!()
     }
 
     pub fn set_readonly(&mut self, _readonly: bool) {
-        match self.0 {}
+        unimplemented!()
     }
 }
 
 impl Clone for FilePermissions {
     fn clone(&self) -> FilePermissions {
-        match self.0 {}
+        unimplemented!()
     }
 }
 
 impl PartialEq for FilePermissions {
     fn eq(&self, _other: &FilePermissions) -> bool {
-        match self.0 {}
+        unimplemented!()
     }
 }
 
@@ -82,7 +85,7 @@ impl Eq for FilePermissions {}
 
 impl fmt::Debug for FilePermissions {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {}
+        unimplemented!()
     }
 }
 
@@ -144,98 +147,157 @@ impl Iterator for ReadDir {
 
 impl DirEntry {
     pub fn path(&self) -> PathBuf {
-        match self.0 {}
+        unimplemented!()
     }
 
     pub fn file_name(&self) -> OsString {
-        match self.0 {}
+        unimplemented!()
     }
 
     pub fn metadata(&self) -> io::Result<FileAttr> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn file_type(&self) -> io::Result<FileType> {
-        match self.0 {}
+        unsupported()
     }
 }
 
 impl OpenOptions {
     pub fn new() -> OpenOptions {
-        OpenOptions {}
+        OpenOptions {
+            flags: 0,
+            perms: 0o666,
+        }
     }
 
-    pub fn read(&mut self, _read: bool) {}
-    pub fn write(&mut self, _write: bool) {}
-    pub fn append(&mut self, _append: bool) {}
-    pub fn truncate(&mut self, _truncate: bool) {}
-    pub fn create(&mut self, _create: bool) {}
-    pub fn create_new(&mut self, _create_new: bool) {}
+    pub fn read(&mut self, read: bool) {
+        if read {
+            self.flags |= libc::PSP_O_RD_ONLY;
+        }
+    }
+    pub fn write(&mut self, write: bool) {
+        if write {
+            self.flags |= libc::PSP_O_WR_ONLY;
+        }
+    }
+    pub fn append(&mut self, append: bool) {
+        if append {
+            self.flags != libc::PSP_O_APPEND;
+        }
+    }
+    pub fn truncate(&mut self, truncate: bool) {
+        if truncate {
+            self.flags |= libc::PSP_O_TRUNC;
+        }
+    }
+    pub fn create(&mut self, create: bool) {
+        if create {
+            self.flags |= libc::PSP_O_CREAT;
+        }
+    }
+    pub fn create_new(&mut self, create_new: bool) {
+        if create_new {
+            self.flags |= libc::PSP_O_CREAT | libc::PSP_O_EXCL;
+        }
+    }
 }
 
 impl File {
-    pub fn open(_path: &Path, _opts: &OpenOptions) -> io::Result<File> {
-        unsupported()
+    pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
+        let cstring = cstring(path)?;
+        let open_result = unsafe {
+            libc::sceIoOpen(cstring.as_c_str().as_ptr() as *const u8, opts.flags, opts.perms)
+        };
+        if open_result.0 < 0 {
+            // Need to enumerate errors to return the proper io::ErrorKind
+            unimplemented!()
+        } else {
+            Ok(File(open_result))
+        }
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn fsync(&self) -> io::Result<()> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn datasync(&self) -> io::Result<()> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn truncate(&self, _size: u64) -> io::Result<()> {
-        match self.0 {}
+        unsupported()
     }
 
-    pub fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
-        match self.0 {}
+    pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+        let read_result = unsafe {
+            libc::sceIoRead(self.0, buf.as_mut_ptr() as *mut c_void, buf.len() as u32)
+        };
+        if read_result < 0 {
+            // Need to enumerate errors to return the proper io::ErrorKind
+            unimplemented!()
+        } else {
+            Ok(buf.len())
+        }
     }
 
     pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn is_read_vectored(&self) -> bool {
-        match self.0 {}
+        unimplemented!()
     }
 
-    pub fn write(&self, _buf: &[u8]) -> io::Result<usize> {
-        match self.0 {}
+    pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
+        let write_result = unsafe {
+            libc::sceIoWrite(self.0, buf.as_ptr() as *const c_void, buf.len())
+        };
+        if write_result < 0 {
+            // Need to enumerate errors to return the proper io::ErrorKind
+            unimplemented!()
+        } else {
+            Ok(buf.len())
+        }
     }
 
     pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn is_write_vectored(&self) -> bool {
-        match self.0 {}
+        unimplemented!()
     }
 
     pub fn flush(&self) -> io::Result<()> {
-        match self.0 {}
+        Ok(())
     }
 
-    pub fn seek(&self, _pos: SeekFrom) -> io::Result<u64> {
-        match self.0 {}
+    pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
+        //let (whence, pos) = match pos {
+            //SeekFrom::Start(off) => (libc::IoWhence::Set, off as i64),
+            //SeekFrom::End(off) => (libc::IoWhence::End, off),
+            //SeekFrom::Current(off) => (libc::IoWhence::Cur, off),
+        //};
+        //Ok(unsafe{libc::sceIoLseek(self.0, pos, whence)} as u64)
+        // broken somehow
+        unsupported()
     }
 
     pub fn duplicate(&self) -> io::Result<File> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
-        match self.0 {}
+        unsupported()
     }
 
     pub fn diverge(&self) -> ! {
-        match self.0 {}
+        unimplemented!()
     }
 }
 
@@ -244,40 +306,107 @@ impl DirBuilder {
         DirBuilder {}
     }
 
-    pub fn mkdir(&self, _p: &Path) -> io::Result<()> {
-        unsupported()
+    pub fn mkdir(&self, p: &Path) -> io::Result<()> {
+        let cstring = cstring(p)?;
+        let result = unsafe { libc::sceIoMkdir(cstring.as_c_str().as_ptr() as *const u8, 0o777) };
+        if result < 0 {
+            // Need to enumerate errors to return the proper io::ErrorKind
+            unimplemented!()
+        } else {
+            Ok(())
+        }
     }
+}
+
+fn cstring(path: &Path) -> io::Result<CString> {
+    Ok(CString::new(path.to_str().ok_or(io::Error::new(io::ErrorKind::InvalidInput, "Path to str failed"))?)?)
 }
 
 impl fmt::Debug for File {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {}
+        unimplemented!()
     }
 }
 
-pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
-    unsupported()
+impl Drop for File {
+    fn drop(&mut self) {
+        unsafe { libc::sceIoClose(self.0) };
+    }
 }
 
-pub fn unlink(_p: &Path) -> io::Result<()> {
+pub fn readdir(p: &Path) -> io::Result<ReadDir> {
     unsupported()
+    //let cstring = cstring(p)?;
+    //let open_result = libc::sceIoDopen(cstring.as_c_str().as_ptr() as *const u8);
+    //if open_result.0 < 0 {
+        //// Need to enumerate errors to return the proper io::ErrorKind
+        //unimplemented!()
+    //} else {
+        //let mut dirent: libc::SceIoDirent = core::mem::zeroed();
+        //let read_result = libc::sceIoDread(open_result, &mut dirent); 
+        //if read_result < 0 {
+            //unimplemented!()
+        //} else {
+            //Ok(ReadDir(dirent))
+        //}
+    //}
+    // I think maybe this is supposed to recursively build DirEntrys into a linked 
+    // list or some shit
 }
 
-pub fn rename(_old: &Path, _new: &Path) -> io::Result<()> {
-    unsupported()
+pub fn unlink(p: &Path) -> io::Result<()> {
+    let cstring = cstring(p)?;
+    let result = unsafe { libc::sceIoRemove(cstring.as_c_str().as_ptr() as *const u8) };
+    if result < 0 {
+        unimplemented!()
+    } else {
+        Ok(())
+    }
 }
 
-pub fn set_perm(_p: &Path, perm: FilePermissions) -> io::Result<()> {
-    match perm.0 {}
+pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
+    let cstring_old = cstring(old)?;
+    let cstring_new = cstring(new)?;
+    let rename_result = unsafe { libc::sceIoRename(cstring_old.as_c_str().as_ptr() as *const u8, cstring_new.as_c_str().as_ptr() as *const u8) };
+    if rename_result < 0 {
+        // Need to enumerate errors to return the proper io::ErrorKind
+        unimplemented!()
+    } else {
+        Ok(())
+    }
 }
 
-pub fn rmdir(_p: &Path) -> io::Result<()> {
-    unsupported()
+pub fn set_perm(p: &Path, perm: FilePermissions) -> io::Result<()> {
+    let cstring = cstring(p)?;
+    let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() };
+    let getstat_result = unsafe { libc::sceIoGetstat(cstring.as_c_str().as_ptr() as *const u8, &mut stat)};
+    if getstat_result < 0 {
+        unimplemented!()
+    } else {
+        let non_perm_mode_bits = stat.st_mode & 0x7e00;  
+        stat.st_mode = non_perm_mode_bits | perm.0;
+        let chstat_result = unsafe { libc::sceIoChstat(cstring.as_c_str().as_ptr() as *const u8, &mut stat, 0x0001) }; 
+        if chstat_result < 0 {
+            unimplemented!()
+        } else {
+            Ok(())
+        }
+    }
 }
 
-pub fn remove_dir_all(_path: &Path) -> io::Result<()> {
-    unsupported()
+pub fn rmdir(p: &Path) -> io::Result<()> {
+    let cstring = cstring(p)?;
+    let rm_result = unsafe { libc::sceIoRmdir(cstring.as_c_str().as_ptr() as *const u8) };
+    if rm_result < 0 {
+        // Need to enumerate errors to return the proper io::ErrorKind
+        unimplemented!()
+    } else {
+        Ok(())
+    }
+ 
 }
+
+pub use crate::sys_common::fs::remove_dir_all;
 
 pub fn readlink(_p: &Path) -> io::Result<PathBuf> {
     unsupported()
@@ -291,8 +420,19 @@ pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
     unsupported()
 }
 
-pub fn stat(_p: &Path) -> io::Result<FileAttr> {
-    unsupported()
+pub fn stat(p: &Path) -> io::Result<FileAttr> {
+    let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() }; 
+    let cstring = cstring(p)?;
+    let stat_result = unsafe {
+        libc::sceIoGetstat(cstring.as_c_str().as_ptr() as *const u8, &mut stat)
+    };
+    if stat_result < 0 {
+        // Need to enumerate errors to return the proper io::ErrorKind
+        unimplemented!()
+    } else {
+        Ok(FileAttr(stat))
+    }
+   
 }
 
 pub fn lstat(_p: &Path) -> io::Result<FileAttr> {
