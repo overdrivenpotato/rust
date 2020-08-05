@@ -1,3 +1,15 @@
+//use libc::{
+//    sceKernelCreateSema,
+//    SceKernelSemaOptParam,
+//};
+//pub fn sceKernelCreateSema(
+//    name: *const u8,
+//    attr: u32,
+//    init_val: i32,
+//    max_val: i32,
+//    option: *mut SceKernelSemaOptParam,
+//) -> SceUid;
+
 use crate::cell::UnsafeCell;
 
 pub struct Mutex {

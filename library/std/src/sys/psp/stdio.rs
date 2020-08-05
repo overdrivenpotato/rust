@@ -1,4 +1,5 @@
 use crate::io;
+use crate::sys::fd::FileDesc;
 use libc::{sceIoRead, sceIoWrite, sceKernelStderr, sceKernelStdin, sceKernelStdout};
 
 pub struct Stdin;
@@ -11,13 +12,13 @@ impl Stdin {
     }
 }
 
+// TODO: change to use filedesc + read/write, as in others
 impl io::Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        unsafe {
-            let fd = sceKernelStdin();
-            let ret = sceIoRead(fd, buf.as_ptr() as _, buf.len() as _);
-            Ok(ret as usize)
-        }
+        let fd = FileDesc::new(unsafe { sceKernelStdin() });
+        let ret = fd.read(buf);
+        fd.into_raw(); // do not close this FD
+        ret
     }
 }
 
@@ -29,11 +30,10 @@ impl Stdout {
 
 impl io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unsafe {
-            let fd = sceKernelStdout();
-            let ret = sceIoWrite(fd, buf.as_ptr() as _, buf.len());
-        }
-        Ok(buf.len())
+        let fd = FileDesc::new(unsafe { sceKernelStdout() });
+        let ret = fd.write(buf);
+        fd.into_raw(); // do not close this FD
+        ret
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -49,11 +49,10 @@ impl Stderr {
 
 impl io::Write for Stderr {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unsafe {
-            let fd = sceKernelStderr();
-            let ret = sceIoWrite(fd, buf.as_ptr() as _, buf.len());
-        }
-        Ok(buf.len())
+        let fd = FileDesc::new(unsafe { sceKernelStdout() });
+        let ret = fd.write(buf);
+        fd.into_raw(); // do not close this FD
+        ret
     }
 
     fn flush(&mut self) -> io::Result<()> {
