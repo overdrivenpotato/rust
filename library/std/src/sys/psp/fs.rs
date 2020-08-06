@@ -5,9 +5,11 @@ use crate::io::{self, IoSlice, IoSliceMut, SeekFrom};
 use crate::path::{Path, PathBuf};
 use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, Void};
+use core::time::Duration;
 
 pub struct File(libc::SceUid);
 
+#[derive(Copy, Clone)]
 pub struct FileAttr(libc::SceIoStat);
 
 pub struct ReadDir(Void);
@@ -20,9 +22,18 @@ pub struct OpenOptions {
     perms: libc::IoPermissions,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct FilePermissions(libc::IoPermissions);
 
-pub struct FileType(Void);
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct FileType(_FileType);
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+enum _FileType {
+    Symlink,
+    Directory,
+    File
+}
 
 #[derive(Debug)]
 pub struct DirBuilder {}
@@ -33,29 +44,38 @@ impl FileAttr {
     }
 
     pub fn perm(&self) -> FilePermissions {
-        unimplemented!()
+        FilePermissions(self.0.st_mode & 0o777)
     }
 
     pub fn file_type(&self) -> FileType {
-        unimplemented!()
+        if self.0.st_attr & libc::FIO_SO_IFLNK != 0 {
+            return FileType(_FileType::Symlink)
+        }
+        if self.0.st_attr & libc::FIO_SO_IFDIR != 0 {
+            return FileType(_FileType::Directory)
+        }
+        if self.0.st_attr & libc::FIO_SO_IFREG != 0 {
+            return FileType(_FileType::File)
+        }
+        unreachable!()
     }
 
     pub fn modified(&self) -> io::Result<SystemTime> {
-        unsupported()
+        SystemTime::try_from_psp_time(&self.0.st_mtime).map_err(|_|
+            io::Error::new(io::ErrorKind::Other, "Invalid file modification date")
+        )
     }
 
     pub fn accessed(&self) -> io::Result<SystemTime> {
-        unsupported()
+        SystemTime::try_from_psp_time(&self.0.st_atime).map_err(|_|
+        io::Error::new(io::ErrorKind::Other, "Invalid file access date")
+        )
     }
 
     pub fn created(&self) -> io::Result<SystemTime> {
-        unsupported()
-    }
-}
-
-impl Clone for FileAttr {
-    fn clone(&self) -> FileAttr {
-        unimplemented!()
+        SystemTime::try_from_psp_time(&self.0.st_ctime).map_err(|_|
+            io::Error::new(io::ErrorKind::Other, "Invalid file creation date")
+        )
     }
 }
 
@@ -69,65 +89,26 @@ impl FilePermissions {
     }
 }
 
-impl Clone for FilePermissions {
-    fn clone(&self) -> FilePermissions {
-        unimplemented!()
-    }
-}
-
-impl PartialEq for FilePermissions {
-    fn eq(&self, _other: &FilePermissions) -> bool {
-        unimplemented!()
-    }
-}
-
-impl Eq for FilePermissions {}
-
-impl fmt::Debug for FilePermissions {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        unimplemented!()
-    }
-}
-
 impl FileType {
     pub fn is_dir(&self) -> bool {
-        match self.0 {}
+        match self.0 {
+            _FileType::Directory => true,
+            _ => false,
+        }
     }
 
     pub fn is_file(&self) -> bool {
-        match self.0 {}
+        match self.0 {
+            _FileType::File => true,
+            _ => false,
+        }
     }
 
     pub fn is_symlink(&self) -> bool {
-        match self.0 {}
-    }
-}
-
-impl Clone for FileType {
-    fn clone(&self) -> FileType {
-        match self.0 {}
-    }
-}
-
-impl Copy for FileType {}
-
-impl PartialEq for FileType {
-    fn eq(&self, _other: &FileType) -> bool {
-        match self.0 {}
-    }
-}
-
-impl Eq for FileType {}
-
-impl Hash for FileType {
-    fn hash<H: Hasher>(&self, _h: &mut H) {
-        match self.0 {}
-    }
-}
-
-impl fmt::Debug for FileType {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {}
+        match self.0 {
+            _FileType::Symlink => true,
+            _ => false,
+        }
     }
 }
 
