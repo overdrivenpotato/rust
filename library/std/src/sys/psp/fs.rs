@@ -442,6 +442,7 @@ pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
 
 fn cvt_io_error(err: i32) -> io::Error {
     match err {
+        0x80010002 => io::Error::new(io::ErrorKind::NotFound, "Not found"),
         0x800200d3 => io::Error::new(io::ErrorKind::InvalidInput, "Invalid address"),
         0x80020320 => io::Error::new(io::ErrorKind::Other, "Too many open files"),
         0x800200d1 => io::Error::new(io::ErrorKind::PermissionDenied, "Permission denied"),
