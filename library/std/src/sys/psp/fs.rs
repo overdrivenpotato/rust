@@ -6,6 +6,7 @@ use crate::path::{Path, PathBuf};
 use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, Void};
 use core::time::Duration;
+use crate::sys::io::cvt_io_error;
 
 pub struct File(libc::SceUid);
 
@@ -419,22 +420,4 @@ pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
 
 pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
     unsupported()
-}
-
-fn cvt_io_error(err: i32) -> io::Error {
-    match err {
-        0x80010002 => io::Error::new(io::ErrorKind::NotFound, "Not found"),
-        0x800200d3 => io::Error::new(io::ErrorKind::InvalidInput, "Invalid address"),
-        0x80020320 => io::Error::new(io::ErrorKind::Other, "Too many open files"),
-        0x800200d1 => io::Error::new(io::ErrorKind::PermissionDenied, "Permission denied"),
-        0x8002032c => io::Error::new(io::ErrorKind::InvalidInput, "No current working directory"),
-        0x8002032d => io::Error::new(io::ErrorKind::InvalidInput, "File name too long"),
-        0x80020321 => io::Error::new(io::ErrorKind::InvalidInput, "No such device"),
-        0x80020325 => io::Error::new(io::ErrorKind::InvalidInput, "Unsupported operation"),
-        0x80020190 => io::Error::new(io::ErrorKind::Other, "No memory"),
-        0x80020064 => io::Error::new(io::ErrorKind::Other, "Called from interrupt handler/thread"),
-        0x80020323 => io::Error::new(io::ErrorKind::InvalidInput, "Bad file descriptor"),
-        0x80020130 => io::Error::new(io::ErrorKind::Other, "Read error"),
-        _ => io::Error::new(io::ErrorKind::Other, "Unknown"),
-    }
 }
