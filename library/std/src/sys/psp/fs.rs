@@ -210,8 +210,7 @@ impl File {
             libc::sceIoOpen(cstring.as_c_str().as_ptr() as *const u8, opts.flags, opts.perms)
         };
         if open_result.0 < 0 {
-            // Need to enumerate errors to return the proper io::ErrorKind
-            unimplemented!()
+            return Err(cvt_io_error(open_result.0));
         } else {
             Ok(File(open_result))
         }
@@ -238,8 +237,7 @@ impl File {
             libc::sceIoRead(self.0, buf.as_mut_ptr() as *mut c_void, buf.len() as u32)
         };
         if read_result < 0 {
-            // Need to enumerate errors to return the proper io::ErrorKind
-            unimplemented!()
+            return Err(cvt_io_error(read_result));
         } else {
             Ok(buf.len())
         }
@@ -258,8 +256,7 @@ impl File {
             libc::sceIoWrite(self.0, buf.as_ptr() as *const c_void, buf.len())
         };
         if write_result < 0 {
-            // Need to enumerate errors to return the proper io::ErrorKind
-            unimplemented!()
+            return Err(cvt_io_error(write_result));
         } else {
             Ok(buf.len())
         }
@@ -310,8 +307,7 @@ impl DirBuilder {
         let cstring = cstring(p)?;
         let result = unsafe { libc::sceIoMkdir(cstring.as_c_str().as_ptr() as *const u8, 0o777) };
         if result < 0 {
-            // Need to enumerate errors to return the proper io::ErrorKind
-            unimplemented!()
+            return Err(cvt_io_error(result));
         } else {
             Ok(())
         }
@@ -358,7 +354,7 @@ pub fn unlink(p: &Path) -> io::Result<()> {
     let cstring = cstring(p)?;
     let result = unsafe { libc::sceIoRemove(cstring.as_c_str().as_ptr() as *const u8) };
     if result < 0 {
-        unimplemented!()
+        return Err(cvt_io_error(result));
     } else {
         Ok(())
     }
@@ -369,8 +365,7 @@ pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
     let cstring_new = cstring(new)?;
     let rename_result = unsafe { libc::sceIoRename(cstring_old.as_c_str().as_ptr() as *const u8, cstring_new.as_c_str().as_ptr() as *const u8) };
     if rename_result < 0 {
-        // Need to enumerate errors to return the proper io::ErrorKind
-        unimplemented!()
+        return Err(cvt_io_error(rename_result));
     } else {
         Ok(())
     }
@@ -381,13 +376,13 @@ pub fn set_perm(p: &Path, perm: FilePermissions) -> io::Result<()> {
     let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() };
     let getstat_result = unsafe { libc::sceIoGetstat(cstring.as_c_str().as_ptr() as *const u8, &mut stat)};
     if getstat_result < 0 {
-        unimplemented!()
+        return Err(cvt_io_error(getstat_result));
     } else {
         let non_perm_mode_bits = stat.st_mode & 0x7e00;  
         stat.st_mode = non_perm_mode_bits | perm.0;
         let chstat_result = unsafe { libc::sceIoChstat(cstring.as_c_str().as_ptr() as *const u8, &mut stat, 0x0001) }; 
         if chstat_result < 0 {
-            unimplemented!()
+            return Err(cvt_io_error(chstat_result));
         } else {
             Ok(())
         }
@@ -398,8 +393,7 @@ pub fn rmdir(p: &Path) -> io::Result<()> {
     let cstring = cstring(p)?;
     let rm_result = unsafe { libc::sceIoRmdir(cstring.as_c_str().as_ptr() as *const u8) };
     if rm_result < 0 {
-        // Need to enumerate errors to return the proper io::ErrorKind
-        unimplemented!()
+        return Err(cvt_io_error(rm_result));
     } else {
         Ok(())
     }
@@ -427,8 +421,7 @@ pub fn stat(p: &Path) -> io::Result<FileAttr> {
         libc::sceIoGetstat(cstring.as_c_str().as_ptr() as *const u8, &mut stat)
     };
     if stat_result < 0 {
-        // Need to enumerate errors to return the proper io::ErrorKind
-        unimplemented!()
+        return Err(cvt_io_error(stat_result));
     } else {
         Ok(FileAttr(stat))
     }
@@ -445,4 +438,21 @@ pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
 
 pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
     unsupported()
+}
+
+fn cvt_io_error(err: i32) -> io::Error {
+    match err {
+        0x800200d3 => io::Error::new(io::ErrorKind::InvalidInput, "Invalid address"),
+        0x80020320 => io::Error::new(io::ErrorKind::Other, "Too many open files"),
+        0x800200d1 => io::Error::new(io::ErrorKind::PermissionDenied, "Permission denied"),
+        0x8002032c => io::Error::new(io::ErrorKind::InvalidInput, "No current working directory"),
+        0x8002032d => io::Error::new(io::ErrorKind::InvalidInput, "File name too long"),
+        0x80020321 => io::Error::new(io::ErrorKind::InvalidInput, "No such device"),
+        0x80020325 => io::Error::new(io::ErrorKind::InvalidInput, "Unsupported operation"),
+        0x80020190 => io::Error::new(io::ErrorKind::Other, "No memory"),
+        0x80020064 => io::Error::new(io::ErrorKind::Other, "Called from interrupt handler/thread"),
+        0x80020323 => io::Error::new(io::ErrorKind::InvalidInput, "Bad file descriptor"),
+        0x80020130 => io::Error::new(io::ErrorKind::Other, "Read error"),
+        _ => io::Error::new(io::ErrorKind::Other, "Unknown"),
+    }
 }
