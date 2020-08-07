@@ -8,7 +8,11 @@ use crate::sys::{unsupported, Void};
 use core::time::Duration;
 use crate::sys::io::cvt_io_error;
 
-pub struct File(libc::SceUid);
+pub struct File {
+    fd: libc::SceUid,
+    // necessary because we don't have fstat et al
+    path: CString,
+}
 
 #[derive(Copy, Clone)]
 pub struct FileAttr(libc::SceIoStat);
@@ -23,7 +27,7 @@ pub struct OpenOptions {
     perms: libc::IoPermissions,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct FilePermissions(libc::IoPermissions);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -37,7 +41,9 @@ enum _FileType {
 }
 
 #[derive(Debug)]
-pub struct DirBuilder {}
+pub struct DirBuilder {
+    mode: i32
+}
 
 impl FileAttr {
     pub fn size(&self) -> u64 {
@@ -82,11 +88,21 @@ impl FileAttr {
 
 impl FilePermissions {
     pub fn readonly(&self) -> bool {
-        unimplemented!()
+        self.0 & 0o222 == 0
     }
 
-    pub fn set_readonly(&mut self, _readonly: bool) {
-        unimplemented!()
+    pub fn set_readonly(&mut self, readonly: bool) {
+        if readonly {
+            self.0 &= !0o222
+        } else {
+            self.0 |= 0o222;
+        }
+    }
+}
+
+impl fmt::Debug for FilePermissions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("FilePermissions(0o{:o})", self.0))
     }
 }
 
@@ -133,15 +149,25 @@ impl DirEntry {
     }
 
     pub fn file_name(&self) -> OsString {
-        unimplemented!()
+        // TODO maybe it's not utf8?
+        OsString::from(unsafe { String::from_utf8_unchecked(self.0.d_name.to_vec()) })
     }
 
     pub fn metadata(&self) -> io::Result<FileAttr> {
-        unsupported()
+        Ok(FileAttr(self.0.d_stat))
     }
 
     pub fn file_type(&self) -> io::Result<FileType> {
-        unsupported()
+        if self.0.d_stat.st_attr & libc::FIO_SO_IFLNK != 0 {
+            return Ok(FileType(_FileType::Symlink))
+        }
+        if self.0.d_stat.st_attr & libc::FIO_SO_IFDIR != 0 {
+            return Ok(FileType(_FileType::Directory))
+        }
+        if self.0.d_stat.st_attr & libc::FIO_SO_IFREG != 0 {
+            return Ok(FileType(_FileType::File))
+        }
+        unreachable!()
     }
 }
 
@@ -194,62 +220,94 @@ impl File {
         if open_result.0 < 0 {
             return Err(cvt_io_error(open_result.0));
         } else {
-            Ok(File(open_result))
+            Ok(File {fd: open_result, path: cstring} )
         }
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        unsupported()
+        let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() }; 
+        let stat_result = unsafe {
+            libc::sceIoGetstat(self.path.as_c_str().as_ptr() as *const u8, &mut stat)
+        };
+        if stat_result < 0 {
+            return Err(cvt_io_error(stat_result));
+        } else {
+            Ok(FileAttr(stat))
+        }
     }
 
     pub fn fsync(&self) -> io::Result<()> {
-        unsupported()
+        // kind of jank way of getting just the device name out of the path ie "ms0:"
+        // TODO relative paths?
+        let device_name = CString::new(
+            self.path
+                .to_str()
+                .map_err(|_| io::Error::new(
+                    io::ErrorKind::Other,
+                    "Path could not be referenced as str"))?
+                .split("/")
+                .next()
+                .unwrap()
+        ).unwrap();
+        let result = unsafe { libc::sceIoSync(device_name.as_c_str().as_ptr() as *const u8, 0) };
+        if result < 0 {
+            return Err(cvt_io_error(result));
+        } else {
+            Ok(())
+        }
     }
 
     pub fn datasync(&self) -> io::Result<()> {
-        unsupported()
+        self.fsync()
     }
 
-    pub fn truncate(&self, _size: u64) -> io::Result<()> {
-        unsupported()
+    pub fn truncate(&self, size: u64) -> io::Result<()> {
+        let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() };
+        stat.st_size = size as i64;
+        let result = unsafe { libc::sceIoChstat(self.path.as_c_str().as_ptr() as *const u8, &mut stat, 0x0004) };
+        if result < 0 {
+            return Err(cvt_io_error(result));
+        } else {
+            Ok(())
+        }
     }
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
         let read_result = unsafe {
-            libc::sceIoRead(self.0, buf.as_mut_ptr() as *mut c_void, buf.len() as u32)
+            libc::sceIoRead(self.fd, buf.as_mut_ptr() as *mut c_void, buf.len() as u32)
         };
         if read_result < 0 {
             return Err(cvt_io_error(read_result));
         } else {
-            Ok(buf.len())
+            Ok(read_result as usize)
         }
     }
 
-    pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        unsupported()
+    pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+        crate::io::default_read_vectored(|buf| self.read(buf), bufs)
     }
 
     pub fn is_read_vectored(&self) -> bool {
-        unimplemented!()
+        false
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
         let write_result = unsafe {
-            libc::sceIoWrite(self.0, buf.as_ptr() as *const c_void, buf.len())
+            libc::sceIoWrite(self.fd, buf.as_ptr() as *const c_void, buf.len())
         };
         if write_result < 0 {
             return Err(cvt_io_error(write_result));
         } else {
-            Ok(buf.len())
+            Ok(write_result as usize)
         }
     }
 
-    pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        unsupported()
+    pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+        crate::io::default_write_vectored(|buf| self.write(buf), bufs)
     }
 
     pub fn is_write_vectored(&self) -> bool {
-        unimplemented!()
+        false
     }
 
     pub fn flush(&self) -> io::Result<()> {
@@ -257,22 +315,34 @@ impl File {
     }
 
     pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
-        //let (whence, pos) = match pos {
-            //SeekFrom::Start(off) => (libc::IoWhence::Set, off as i64),
-            //SeekFrom::End(off) => (libc::IoWhence::End, off),
-            //SeekFrom::Current(off) => (libc::IoWhence::Cur, off),
-        //};
-        //Ok(unsafe{libc::sceIoLseek(self.0, pos, whence)} as u64)
-        // broken somehow
-        unsupported()
+        let (whence, pos) = match pos {
+            SeekFrom::Start(off) => (libc::IoWhence::Set, off as i64),
+            SeekFrom::End(off) => (libc::IoWhence::End, off),
+            SeekFrom::Current(off) => (libc::IoWhence::Cur, off),
+        };
+        // TODO use 64bit version once abi is fixed
+        Ok(unsafe{libc::sceIoLseek32(self.fd, pos as i32, whence)} as u64)
     }
 
     pub fn duplicate(&self) -> io::Result<File> {
         unsupported()
     }
 
-    pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
-        unsupported()
+    pub fn set_permissions(&self, perm: FilePermissions) -> io::Result<()> {
+        let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() };
+        let getstat_result = unsafe { libc::sceIoGetstat(self.path.as_c_str().as_ptr() as *const u8, &mut stat)};
+        if getstat_result < 0 {
+            return Err(cvt_io_error(getstat_result));
+        } else {
+            let non_perm_mode_bits = stat.st_mode & 0x7e00;  
+            stat.st_mode = non_perm_mode_bits | perm.0;
+            let chstat_result = unsafe { libc::sceIoChstat(self.path.as_c_str().as_ptr() as *const u8, &mut stat, 0x0001) }; 
+            if chstat_result < 0 {
+                return Err(cvt_io_error(chstat_result));
+            } else {
+                Ok(())
+            }
+        }
     }
 
     pub fn diverge(&self) -> ! {
@@ -282,12 +352,12 @@ impl File {
 
 impl DirBuilder {
     pub fn new() -> DirBuilder {
-        DirBuilder {}
+        DirBuilder {mode: 0o777}
     }
 
     pub fn mkdir(&self, p: &Path) -> io::Result<()> {
         let cstring = cstring(p)?;
-        let result = unsafe { libc::sceIoMkdir(cstring.as_c_str().as_ptr() as *const u8, 0o777) };
+        let result = unsafe { libc::sceIoMkdir(cstring.as_c_str().as_ptr() as *const u8, self.mode) };
         if result < 0 {
             return Err(cvt_io_error(result));
         } else {
@@ -301,14 +371,17 @@ fn cstring(path: &Path) -> io::Result<CString> {
 }
 
 impl fmt::Debug for File {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        unimplemented!()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("File")
+            .field("fd", &self.fd.0)
+            .field("path", &self.path)
+            .finish()
     }
 }
 
 impl Drop for File {
     fn drop(&mut self) {
-        unsafe { libc::sceIoClose(self.0) };
+        unsafe { libc::sceIoClose(self.fd) };
     }
 }
 
@@ -397,8 +470,8 @@ pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
 }
 
 pub fn stat(p: &Path) -> io::Result<FileAttr> {
-    let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() }; 
     let cstring = cstring(p)?;
+    let mut stat: libc::SceIoStat = unsafe { core::mem::zeroed() }; 
     let stat_result = unsafe {
         libc::sceIoGetstat(cstring.as_c_str().as_ptr() as *const u8, &mut stat)
     };
@@ -407,7 +480,6 @@ pub fn stat(p: &Path) -> io::Result<FileAttr> {
     } else {
         Ok(FileAttr(stat))
     }
-   
 }
 
 pub fn lstat(_p: &Path) -> io::Result<FileAttr> {
@@ -418,6 +490,4 @@ pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
     unsupported()
 }
 
-pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
-    unsupported()
-}
+pub use crate::sys_common::fs::copy;
