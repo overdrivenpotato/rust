@@ -17,7 +17,7 @@ pub struct File {
 #[derive(Copy, Clone)]
 pub struct FileAttr(libc::SceIoStat);
 
-pub struct ReadDir(Void);
+pub struct ReadDir(libc::SceUid);
 
 pub struct DirEntry(libc::SceIoDirent);
 
@@ -130,8 +130,16 @@ impl FileType {
 }
 
 impl fmt::Debug for ReadDir {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {}
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadDir")
+            .field("fd", &self.0.0)
+            .finish()
+    }
+}
+
+impl Drop for ReadDir {
+    fn drop(&mut self) {
+        unsafe { libc::sceIoDclose(self.0) };
     }
 }
 
@@ -139,7 +147,18 @@ impl Iterator for ReadDir {
     type Item = io::Result<DirEntry>;
 
     fn next(&mut self) -> Option<io::Result<DirEntry>> {
-        match self.0 {}
+        let mut dirent: libc::SceIoDirent = unsafe { core::mem::zeroed() };
+        let result = unsafe {libc::sceIoDread(self.0, &mut dirent)};
+        if result < 0 {
+            return Some(Err(cvt_io_error(result)));
+        } else {
+            let remaining = result;
+            if remaining > 0 {
+                Some(Ok(DirEntry(dirent)))
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -320,8 +339,12 @@ impl File {
             SeekFrom::End(off) => (libc::IoWhence::End, off),
             SeekFrom::Current(off) => (libc::IoWhence::Cur, off),
         };
-        // TODO use 64bit version once abi is fixed
-        Ok(unsafe{libc::sceIoLseek32(self.fd, pos as i32, whence)} as u64)
+        let result = unsafe{libc::sceIoLseek(self.fd, pos, whence)};
+        if result < 0 {
+            return Err(cvt_io_error(result as i32));
+        } else {
+            Ok(result as u64)
+        }
     }
 
     pub fn duplicate(&self) -> io::Result<File> {
@@ -386,23 +409,13 @@ impl Drop for File {
 }
 
 pub fn readdir(p: &Path) -> io::Result<ReadDir> {
-    unsupported()
-    //let cstring = cstring(p)?;
-    //let open_result = libc::sceIoDopen(cstring.as_c_str().as_ptr() as *const u8);
-    //if open_result.0 < 0 {
-        //// Need to enumerate errors to return the proper io::ErrorKind
-        //unimplemented!()
-    //} else {
-        //let mut dirent: libc::SceIoDirent = core::mem::zeroed();
-        //let read_result = libc::sceIoDread(open_result, &mut dirent); 
-        //if read_result < 0 {
-            //unimplemented!()
-        //} else {
-            //Ok(ReadDir(dirent))
-        //}
-    //}
-    // I think maybe this is supposed to recursively build DirEntrys into a linked 
-    // list or some shit
+    let cstring = cstring(p)?;
+    let open_result = unsafe {libc::sceIoDopen(cstring.as_c_str().as_ptr() as *const u8)};
+    if open_result.0 < 0 {
+        return Err(cvt_io_error(open_result.0));
+    } else {
+        Ok(ReadDir(open_result))
+    }
 }
 
 pub fn unlink(p: &Path) -> io::Result<()> {

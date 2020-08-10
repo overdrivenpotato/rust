@@ -96,6 +96,7 @@ pub(crate) fn cvt_io_error(err: i32) -> io::Error {
         0x80020320 => io::Error::new(io::ErrorKind::Other, "Too many open files"),
         0x80020321 => io::Error::new(io::ErrorKind::InvalidInput, "No such device"),
         0x80020323 => io::Error::new(io::ErrorKind::InvalidInput, "Bad file descriptor"),
+        0x80020324 => io::Error::new(io::ErrorKind::InvalidInput, "Invalid argument"),
         0x80020325 => io::Error::new(io::ErrorKind::InvalidInput, "Unsupported operation"),
         0x8002032c => io::Error::new(io::ErrorKind::InvalidInput, "No current working directory"),
         0x8002032d => io::Error::new(io::ErrorKind::InvalidInput, "File name too long"),
