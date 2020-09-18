@@ -48,6 +48,19 @@ impl SystemTime {
         }
         Self(Duration::from_secs(t as u64))
     }
+    
+    pub fn from_unix_time(t: u64) -> SystemTime {
+        Self(Duration::from_secs(t))
+    }
+
+    pub fn try_from_psp_time(t: &libc::ScePspDateTime) -> Result<SystemTime, ()> {
+        let mut secs_since_epoch: u64 = 0;
+        if unsafe {libc::sceRtcGetTime64_t(t as *const libc::ScePspDateTime, &mut secs_since_epoch as *mut u64)} < 0 {
+            Err(())
+        } else {
+            Ok(Self(Duration::from_secs(secs_since_epoch)))
+        }
+    }
 
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
         self.0.checked_sub(other.0).ok_or_else(|| other.0 - self.0)

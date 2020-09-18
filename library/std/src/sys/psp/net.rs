@@ -199,7 +199,7 @@ impl TcpListener {
                 socket: Socket(sock),
                 peer_addr: sockaddr,
             };
-            Ok((stream, SocketAddr::V4(sockaddr)))
+            return Ok((stream, SocketAddr::V4(sockaddr)))
         }
         unsupported()
     }
@@ -396,11 +396,11 @@ impl Iterator for LookupHost {
     fn next(&mut self) -> Option<SocketAddr> {
         let mut in_addr: libc::in_addr = unsafe { core::mem::zeroed() };
         let result =  unsafe { libc::sceNetResolverStartNtoA(self.resolver_id, self.hostname.as_ptr() as *const u8, &mut in_addr, self.timeout, self.retries) };
-        if result < 0 || in_addr.0 == self.prev_result {
+        if result < 0 || in_addr.s_addr == self.prev_result {
             None
         } else {
-            self.prev_result = in_addr.0;
-            let octets = u32::to_le_bytes(in_addr.0);
+            self.prev_result = in_addr.s_addr;
+            let octets = u32::to_le_bytes(in_addr.s_addr);
             Some(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]), self.port)))
         }
     }
