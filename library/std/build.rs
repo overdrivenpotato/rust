@@ -27,6 +27,7 @@ fn main() {
         || target.contains("vxworks")
         || target.contains("wasm32")
         || target.contains("asmjs")
+        || target.contains("psp")
     {
         // These platforms don't have any special requirements.
     } else {
@@ -34,7 +35,6 @@ fn main() {
         // typically no_std platforms.
         // This covers:
         // - os=none ("bare metal" targets)
-        // - mipsel-sony-psp
         // - nvptx64-nvidia-cuda
         // - arch=avr
         // - tvos (aarch64-apple-tvos, x86_64-apple-tvos)
