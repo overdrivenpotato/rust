@@ -9,6 +9,7 @@ use crate::ffi::CString;
 
 use core::ffi::c_void;
 
+#[derive(Clone)]
 pub struct Socket(i32);
 
 impl Drop for Socket {
@@ -45,28 +46,26 @@ impl TcpStream {
         }
     }
 
+    // these timeout functions definitely aren't supported, despite the psp having
+    // sceNetInetSetsockopt, I checked thoroughly.
+
     pub fn connect_timeout(_: &SocketAddr, _: Duration) -> io::Result<TcpStream> {
-        //TODO might be possible with sceNetInetSetsockopt
         unsupported()
     }
 
-    pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-        //TODO might be possible with sceNetInetSetsockopt
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         unsupported()
     }
 
-    pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-        //TODO might be possible with sceNetInetSetsockopt
+    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         unsupported()
     }
 
     pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-        //TODO might be possible with sceNetInetGetsockopt
         unsupported()
     }
 
     pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-        //TODO might be possible with sceNetInetGetsockopt
         unsupported()
     }
 
@@ -112,7 +111,7 @@ impl TcpStream {
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         let mut addr: netc::sockaddr = unsafe { core::mem::zeroed() };
-        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as u32; 
+        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as netc::socklen_t; 
         let ret = unsafe { sceNetInetGetpeername(self.socket.0, &mut addr, &mut addr_len) };
         if ret < 0 {
             todo!("Error Handling")
@@ -127,7 +126,7 @@ impl TcpStream {
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
         let mut addr: netc::sockaddr = unsafe { core::mem::zeroed() };
-        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as u32; 
+        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as netc::socklen_t; 
         let ret = unsafe { sceNetInetGetsockname(self.socket.0, &mut addr, &mut addr_len) };
         if ret < 0 {
             todo!("Error Handling")
@@ -221,7 +220,7 @@ impl TcpListener {
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
         let mut addr: netc::sockaddr = unsafe { core::mem::zeroed() };
-        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as u32; 
+        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as netc::socklen_t; 
         let ret = unsafe { sceNetInetGetsockname(self.0.0, &mut addr, &mut addr_len) };
         if ret < 0 {
             todo!("Error Handling")
@@ -557,6 +556,19 @@ pub mod netc {
     pub const SOCK_RAW: i32 = 3;
     pub const SOCK_RDM: i32 = 4;
     pub const SOCK_SEQPACKET: i32 = 5;
+
+    pub const SOL_SOCKET: i32 = 0xffff; /// level number for (get/set)sockopt to apply to socket itself
+    pub const SO_SNDBUF: i32 = 0x1001; /// send buffer size
+    pub const SO_RCVBUF: i32 = 0x1002; /// receive buffer size
+    pub const SO_SNDLOWAT: i32 = 0x1003; /// send low-water mark 
+    pub const SO_RCVLOWAT: i32 = 0x1004; /// receive low-water mark 
+    pub const SO_SNDTIMEO: i32 = 0x1005; /// send timeout 
+    pub const SO_RCVTIMEO: i32 = 0x1006; /// receive timeout
+    pub const SO_ERROR: i32 = 0x1007; /// get error status and clear
+    pub const SO_TYPE: i32 = 0x1008; /// get socket type
+    pub const SO_OVERFLOWED: i32 = 0x1009; /// datagrams: return packets dropped 
+    pub const SO_NONBLOCK: i32 = 0x1009; /// non-blocking I/O
+
     pub type sa_family_t = u8;
 
     pub use libc::in_addr;
