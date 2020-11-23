@@ -17,9 +17,9 @@ impl Drop for Socket {
     }
 }
 
+#[derive(Clone)]
 pub struct TcpStream {
     socket: Socket,
-    peer_addr: SocketAddrV4,
 }
 
 impl TcpStream {
@@ -35,7 +35,7 @@ impl TcpStream {
                     if unsafe { libc::sceNetInetConnect(sock, addr, len as u32) } < 0  {
                         todo!("Error Handling")
                     } else {
-                        Ok(TcpStream{socket: Socket(sock), peer_addr: *v4})
+                        Ok(TcpStream{socket: Socket(sock)})
                     }
                 }
                 SocketAddr::V6(_) => {
@@ -46,26 +46,32 @@ impl TcpStream {
     }
 
     pub fn connect_timeout(_: &SocketAddr, _: Duration) -> io::Result<TcpStream> {
+        //TODO might be possible with sceNetInetSetsockopt
         unsupported()
     }
 
     pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+        //TODO might be possible with sceNetInetSetsockopt
         unsupported()
     }
 
     pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+        //TODO might be possible with sceNetInetSetsockopt
         unsupported()
     }
 
     pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
+        //TODO might be possible with sceNetInetGetsockopt
         unsupported()
     }
 
     pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
+        //TODO might be possible with sceNetInetGetsockopt
         unsupported()
     }
 
     pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
+        //TODO might be sceNetInetRecv with MSG_PEEK flag set
         unsupported()
     }
 
@@ -79,8 +85,8 @@ impl TcpStream {
         }
     }
 
-    pub fn read_vectored(&self, _: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        unsupported()
+    pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+        crate::io::default_read_vectored(|buf| self.read(buf), bufs)
     }
 
     pub fn is_read_vectored(&self) -> bool {
@@ -96,8 +102,8 @@ impl TcpStream {
         }
     }
 
-    pub fn write_vectored(&self, _: &[IoSlice<'_>]) -> io::Result<usize> {
-        unsupported()
+    pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+        crate::io::default_write_vectored(|buf| self.write(buf), bufs)
     }
 
     pub fn is_write_vectored(&self) -> bool {
@@ -105,38 +111,70 @@ impl TcpStream {
     }
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
-        Ok(SocketAddr::V4(self.peer_addr))
+        let mut addr: netc::sockaddr = unsafe { core::mem::zeroed() };
+        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as u32; 
+        let ret = unsafe { sceNetInetGetpeername(self.socket.0, &mut addr, &mut addr_len) };
+        if ret < 0 {
+            todo!("Error Handling")
+        } else {
+            let addr = unsafe { core::mem::transmute::<netc::sockaddr, netc::sockaddr_in>(addr) };
+            let port = addr.sin_port;
+            let octets = u32::to_le_bytes(addr.sin_addr.s_addr);
+            let sockaddr = SocketAddrV4::new(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]), port);
+            Ok(SocketAddr::V4(sockaddr))
+        }
     }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-        unsupported()
+        let mut addr: netc::sockaddr = unsafe { core::mem::zeroed() };
+        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as u32; 
+        let ret = unsafe { sceNetInetGetsockname(self.socket.0, &mut addr, &mut addr_len) };
+        if ret < 0 {
+            todo!("Error Handling")
+        } else {
+            let addr = unsafe { core::mem::transmute::<netc::sockaddr, netc::sockaddr_in>(addr) };
+            let port = addr.sin_port;
+            let octets = u32::to_le_bytes(addr.sin_addr.s_addr);
+            let sockaddr = SocketAddrV4::new(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]), port);
+            Ok(SocketAddr::V4(sockaddr))
+        }
     }
 
-    pub fn shutdown(&self, _: Shutdown) -> io::Result<()> {
-        unsupported()
+    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        let result = unsafe { libc::sceNetInetShutdown(self.socket.0, how as i32) };
+        if result < 0 {
+            todo!("Error Handling")
+        } else {
+            Ok(())
+        }
     }
 
     pub fn duplicate(&self) -> io::Result<TcpStream> {
-        unsupported()
+        Ok(self.clone())
     }
 
     pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
+        //TODO might be possible with sceNetInetSetsockopt
         unsupported()
     }
 
     pub fn nodelay(&self) -> io::Result<bool> {
+        //TODO might be possible with sceNetInetGetsockopt
         unsupported()
     }
 
     pub fn set_ttl(&self, _: u32) -> io::Result<()> {
+        //TODO might be possible with sceNetInetSetsockopt
         unsupported()
     }
 
     pub fn ttl(&self) -> io::Result<u32> {
+        //TODO might be possible with sceNetInetGetsockopt
         unsupported()
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
+        //TODO is this the same as sceNetInetGetErrno?
         unsupported()
     }
 
@@ -151,6 +189,7 @@ impl fmt::Debug for TcpStream {
     }
 }
 
+#[derive(Clone)]
 pub struct TcpListener(Socket);
 
 impl TcpListener {
@@ -181,7 +220,18 @@ impl TcpListener {
     }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-        unsupported()
+        let mut addr: netc::sockaddr = unsafe { core::mem::zeroed() };
+        let mut addr_len: netc::socklen_t = core::mem::size_of::<netc::sockaddr_in>() as u32; 
+        let ret = unsafe { sceNetInetGetsockname(self.0.0, &mut addr, &mut addr_len) };
+        if ret < 0 {
+            todo!("Error Handling")
+        } else {
+            let addr = unsafe { core::mem::transmute::<netc::sockaddr, netc::sockaddr_in>(addr) };
+            let port = addr.sin_port;
+            let octets = u32::to_le_bytes(addr.sin_addr.s_addr);
+            let sockaddr = SocketAddrV4::new(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]), port);
+            Ok(SocketAddr::V4(sockaddr))
+        }
     }
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
@@ -197,7 +247,6 @@ impl TcpListener {
             let sockaddr = SocketAddrV4::new(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]), port);
             let stream = TcpStream {
                 socket: Socket(sock),
-                peer_addr: sockaddr,
             };
             return Ok((stream, SocketAddr::V4(sockaddr)))
         }
@@ -205,14 +254,16 @@ impl TcpListener {
     }
 
     pub fn duplicate(&self) -> io::Result<TcpListener> {
-        unsupported()
+        Ok(self.clone())
     }
 
     pub fn set_ttl(&self, _: u32) -> io::Result<()> {
+        //TODO might be possible with sceNetInetSetsockopt
         unsupported()
     }
 
     pub fn ttl(&self) -> io::Result<u32> {
+        //TODO might be possible with sceNetInetGetsockopt
         unsupported()
     }
 
@@ -225,6 +276,7 @@ impl TcpListener {
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
+        //TODO is this the same as sceNetInetGetErrno?
         unsupported()
     }
 
@@ -536,4 +588,19 @@ pub mod netc {
         pub sin6_flowinfo: u32,
         pub sin6_scope_id: u32,
     }
+}
+
+// TODO temporary, upstream in libc and remove
+extern "C" {
+    pub fn sceNetInetGetpeername(
+        s: i32,
+        addr: *mut netc::sockaddr,
+        addr_len: *mut netc::socklen_t,
+    ) -> i32;
+
+    pub fn sceNetInetGetsockname(
+        s: i32,
+        addr: *mut netc::sockaddr,
+        addr_len: *mut netc::socklen_t,
+    ) -> i32;
 }
