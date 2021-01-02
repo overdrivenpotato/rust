@@ -75,7 +75,7 @@ impl FileAttr {
 
     pub fn accessed(&self) -> io::Result<SystemTime> {
         SystemTime::try_from_psp_time(&self.0.st_atime).map_err(|_|
-        io::Error::new(io::ErrorKind::Other, "Invalid file access date")
+            io::Error::new(io::ErrorKind::Other, "Invalid file access date")
         )
     }
 
